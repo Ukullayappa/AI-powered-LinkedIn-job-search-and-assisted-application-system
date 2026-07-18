@@ -2,7 +2,10 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
@@ -40,6 +43,12 @@ class Settings(BaseSettings):
         le=100,
     )
 
+    # React frontend origins allowed to call FastAPI.
+    cors_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173"
+    )
+
     # Only ranked job details are stored locally.
     data_directory: Path = Path("data")
 
@@ -49,6 +58,14 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
     def create_directories(self) -> None:
         self.data_directory.mkdir(

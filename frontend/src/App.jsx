@@ -220,7 +220,7 @@ function App() {
           await refreshAgentStatus();
           await refreshApplicationHistory();
         },
-        2000
+        10000
       );
 
     return () => {

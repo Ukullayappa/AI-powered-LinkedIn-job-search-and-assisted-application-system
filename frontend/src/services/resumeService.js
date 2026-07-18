@@ -13,7 +13,7 @@ export async function uploadResume(file) {
   const formData = new FormData();
 
   formData.append(
-    "file",
+    "resume",
     file
   );
 

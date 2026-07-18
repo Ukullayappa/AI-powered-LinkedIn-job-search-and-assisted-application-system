@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.browser.linkedin_login import (
     linkedin_login_service,
 )
+from app.core.config import get_settings
 from app.schemas.browser_schema import (
     LinkedInLoginRequest,
     LinkedInLoginResponse,
@@ -14,6 +15,8 @@ router = APIRouter(
     tags=["LinkedIn"],
 )
 
+settings = get_settings()
+
 
 @router.post(
     "/login",
@@ -23,10 +26,21 @@ async def login_to_linkedin(
     request: LinkedInLoginRequest,
 ):
     """
-    The password is used only for this request.
-    The backend saves the LinkedIn browser
-    session, not the credentials.
+    LinkedIn login is allowed only when FastAPI
+    is running on the user's Windows computer.
+
+    Credentials are never accepted by the cloud
+    Render deployment.
     """
+    if settings.cloud_mode:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "LinkedIn login must run on the "
+                "Windows local worker. Credentials "
+                "are not accepted by the cloud server."
+            ),
+        )
 
     try:
         return await linkedin_login_service.login(

@@ -8,6 +8,12 @@ from app.schemas.agent_schema import AgentStartRequest
 
 
 class AgentStateService:
+    ACTIVE_STATUSES = {
+        "queued",
+        "running",
+        "paused",
+    }
+
     def __init__(
         self,
     ) -> None:
@@ -42,18 +48,37 @@ class AgentStateService:
             "updated_at": "",
         }
 
-    def create(
+    def ensure_no_active_run(
+        self,
+    ) -> None:
+        latest_state = self.get()
+
+        if (
+            latest_state.get("status")
+            in self.ACTIVE_STATUSES
+            and not latest_state.get(
+                "stop_requested",
+                False,
+            )
+        ):
+            raise ValueError(
+                "An agent run is already queued or active."
+            )
+
+    def build_state(
         self,
         request: AgentStartRequest,
+        status: str,
+        stage: str,
+        message: str,
     ) -> dict:
         current_time = self.now()
-        run_id = str(uuid4())
 
-        state = {
-            "run_id": run_id,
-            "status": "running",
-            "stage": "starting",
-            "message": "Agent is starting.",
+        return {
+            "run_id": str(uuid4()),
+            "status": status,
+            "stage": stage,
+            "message": message,
             "settings": request.model_dump(),
             "jobs_collected": 0,
             "best_jobs": 0,
@@ -70,13 +95,59 @@ class AgentStateService:
             "updated_at": current_time,
         }
 
-        saved_state = (
-            agent_run_repository.create(
-                state
-            )
+    def create(
+        self,
+        request: AgentStartRequest,
+    ) -> dict:
+        """
+        Create a run that starts immediately.
+
+        Used when the FastAPI process is running
+        locally on the Windows worker.
+        """
+        self.ensure_no_active_run()
+
+        state = self.build_state(
+            request=request,
+            status="running",
+            stage="starting",
+            message="Agent is starting.",
         )
 
-        self.current_run_id = run_id
+        saved_state = agent_run_repository.create(
+            state
+        )
+
+        self.current_run_id = saved_state["run_id"]
+
+        return saved_state
+
+    def create_queued(
+        self,
+        request: AgentStartRequest,
+    ) -> dict:
+        """
+        Create a cloud request without starting
+        Playwright on the cloud server.
+        """
+        self.ensure_no_active_run()
+
+        state = self.build_state(
+            request=request,
+            status="queued",
+            stage="waiting_for_worker",
+            message=(
+                "Request queued. Start the Windows "
+                "worker to run LinkedIn automation."
+            ),
+        )
+
+        saved_state = agent_run_repository.create(
+            state
+        )
+
+        self.current_run_id = saved_state["run_id"]
+
         return saved_state
 
     def get(
@@ -116,10 +187,7 @@ class AgentStateService:
                 "No agent run exists to update."
             )
 
-        state.update(
-            changes
-        )
-
+        state.update(changes)
         state["updated_at"] = self.now()
 
         return agent_run_repository.update(
@@ -130,6 +198,18 @@ class AgentStateService:
     def request_stop(
         self,
     ) -> dict:
+        state = self.get()
+
+        if state.get("status") == "queued":
+            return self.update(
+                status="stopped",
+                stage="stopped",
+                stop_requested=True,
+                message=(
+                    "Queued agent run was cancelled."
+                ),
+            )
+
         return self.update(
             stop_requested=True,
             message=(

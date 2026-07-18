@@ -43,6 +43,23 @@ class Settings(BaseSettings):
         le=100,
     )
 
+    # Deployment mode
+    #
+    # False:
+    # Run the complete workflow directly on this
+    # computer. This is used by the Windows worker.
+    #
+    # True:
+    # Store the request in Supabase and wait for
+    # the Windows worker to claim it.
+    cloud_mode: bool = False
+
+    worker_poll_seconds: int = Field(
+        default=5,
+        ge=2,
+        le=60,
+    )
+
     # React frontend origins allowed to call FastAPI.
     cors_origins: str = (
         "http://localhost:5173,"

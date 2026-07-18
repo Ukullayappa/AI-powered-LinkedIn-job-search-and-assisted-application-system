@@ -3,6 +3,7 @@ from fastapi import (
     HTTPException,
 )
 
+from app.core.config import get_settings
 from app.schemas.agent_schema import (
     AgentStartRequest,
     AgentStartResponse,
@@ -21,6 +22,8 @@ router = APIRouter(
     tags=["Autonomous Agent"],
 )
 
+settings = get_settings()
+
 
 @router.post(
     "/start",
@@ -30,16 +33,28 @@ async def start_agent(
     request: AgentStartRequest,
 ):
     try:
-        state = await agent_orchestrator.start(
-            request
-        )
+        if settings.cloud_mode:
+            state = (
+                agent_state_service
+                .create_queued(request)
+            )
+
+            message = (
+                "Agent request queued successfully. "
+                "The Windows worker must be running."
+            )
+
+        else:
+            state = await agent_orchestrator.start(
+                request
+            )
+
+            message = "Agent started successfully."
 
         return AgentStartResponse(
             run_id=state["run_id"],
             status=state["status"],
-            message=(
-                "Agent started successfully."
-            ),
+            message=message,
         )
 
     except ValueError as error:

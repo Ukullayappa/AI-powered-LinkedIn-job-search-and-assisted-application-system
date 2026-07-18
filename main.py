@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.routes.agent_routes import (
@@ -25,6 +26,21 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
+    docs_url=(
+        None
+        if settings.public_demo_mode
+        else "/docs"
+    ),
+    redoc_url=(
+        None
+        if settings.public_demo_mode
+        else "/redoc"
+    ),
+    openapi_url=(
+        None
+        if settings.public_demo_mode
+        else "/openapi.json"
+    ),
 )
 
 
@@ -35,6 +51,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def public_demo_guard(
+    request: Request,
+    call_next,
+):
+    """
+    Protect private candidate information and
+    automation endpoints while the deployed site
+    is being shared as a public portfolio demo.
+    """
+    protected_api_request = (
+        request.url.path.startswith("/api/")
+        and request.url.path != "/api/health"
+    )
+
+    if (
+        settings.public_demo_mode
+        and protected_api_request
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": (
+                    "This deployment is running in "
+                    "public demo mode. Personal data "
+                    "and automation endpoints are "
+                    "disabled."
+                )
+            },
+        )
+
+    return await call_next(request)
 
 
 app.include_router(resume_router)
@@ -50,12 +100,24 @@ async def root():
         "message": (
             f"{settings.app_name} is running"
         ),
-        "docs": "/docs",
+        "mode": (
+            "public_demo"
+            if settings.public_demo_mode
+            else "private"
+        ),
+        "docs": (
+            ""
+            if settings.public_demo_mode
+            else "/docs"
+        ),
     }
 
 
 @app.get("/api/health")
 async def health():
     return {
-        "status": "running"
+        "status": "running",
+        "public_demo_mode": (
+            settings.public_demo_mode
+        ),
     }

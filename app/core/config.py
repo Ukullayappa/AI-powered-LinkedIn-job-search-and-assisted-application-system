@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # Store the request in Supabase and wait for
     # the Windows worker to claim it.
     cloud_mode: bool = False
-
+    public_demo_mode: bool = False
     worker_poll_seconds: int = Field(
         default=5,
         ge=2,

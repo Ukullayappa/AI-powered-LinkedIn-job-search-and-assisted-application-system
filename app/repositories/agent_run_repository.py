@@ -14,9 +14,7 @@ class AgentRunRepository:
         self,
         state: dict[str, Any],
     ) -> dict[str, Any]:
-        payload = self._to_database(
-            state
-        )
+        payload = self._to_database(state)
 
         result = (
             supabase_client
@@ -30,6 +28,26 @@ class AgentRunRepository:
                 "Agent run was not created "
                 "in Supabase."
             )
+
+        return self._from_database(
+            result.data[0]
+        )
+
+    def get_by_run_id(
+        self,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        result = (
+            supabase_client
+            .table(self.TABLE_NAME)
+            .select("*")
+            .eq("run_id", run_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not result.data:
+            return None
 
         return self._from_database(
             result.data[0]
@@ -57,14 +75,40 @@ class AgentRunRepository:
             result.data[0]
         )
 
+    def get_next_queued(
+        self,
+    ) -> dict[str, Any] | None:
+        """
+        Return the oldest queued run that has
+        not been cancelled.
+        """
+        result = (
+            supabase_client
+            .table(self.TABLE_NAME)
+            .select("*")
+            .eq("status", "queued")
+            .eq("stop_requested", False)
+            .order(
+                "created_at",
+                desc=False,
+            )
+            .limit(1)
+            .execute()
+        )
+
+        if not result.data:
+            return None
+
+        return self._from_database(
+            result.data[0]
+        )
+
     def update(
         self,
         run_id: str,
         state: dict[str, Any],
     ) -> dict[str, Any]:
-        payload = self._to_database(
-            state
-        )
+        payload = self._to_database(state)
 
         payload.pop(
             "run_id",
@@ -97,9 +141,7 @@ class AgentRunRepository:
         state: dict[str, Any],
     ) -> dict[str, Any]:
         return {
-            "run_id": state.get(
-                "run_id"
-            ),
+            "run_id": state.get("run_id"),
             "status": state.get(
                 "status",
                 "idle",
@@ -129,15 +171,11 @@ class AgentRunRepository:
                 0,
             ),
             "current_job_id": (
-                state.get(
-                    "current_job_id"
-                )
+                state.get("current_job_id")
                 or None
             ),
             "current_job_title": (
-                state.get(
-                    "current_job_title"
-                )
+                state.get("current_job_title")
                 or None
             ),
             "submitted_count": state.get(
@@ -167,10 +205,7 @@ class AgentRunRepository:
     ) -> dict[str, Any]:
         return {
             "run_id": str(
-                row.get(
-                    "run_id",
-                    "",
-                )
+                row.get("run_id", "")
             ),
             "status": str(
                 row.get(
@@ -185,10 +220,7 @@ class AgentRunRepository:
                 )
             ),
             "message": str(
-                row.get(
-                    "message",
-                    "",
-                )
+                row.get("message", "")
             ),
             "settings": row.get(
                 "settings",

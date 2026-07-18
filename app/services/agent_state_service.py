@@ -51,7 +51,13 @@ class AgentStateService:
     def ensure_no_active_run(
         self,
     ) -> None:
-        latest_state = self.get()
+        latest_state = (
+            agent_run_repository
+            .get_latest()
+        )
+
+        if not latest_state:
+            return
 
         if (
             latest_state.get("status")
@@ -62,7 +68,8 @@ class AgentStateService:
             )
         ):
             raise ValueError(
-                "An agent run is already queued or active."
+                "An agent run is already queued "
+                "or active."
             )
 
     def build_state(
@@ -99,12 +106,6 @@ class AgentStateService:
         self,
         request: AgentStartRequest,
     ) -> dict:
-        """
-        Create a run that starts immediately.
-
-        Used when the FastAPI process is running
-        locally on the Windows worker.
-        """
         self.ensure_no_active_run()
 
         state = self.build_state(
@@ -114,11 +115,14 @@ class AgentStateService:
             message="Agent is starting.",
         )
 
-        saved_state = agent_run_repository.create(
-            state
+        saved_state = (
+            agent_run_repository
+            .create(state)
         )
 
-        self.current_run_id = saved_state["run_id"]
+        self.current_run_id = (
+            saved_state["run_id"]
+        )
 
         return saved_state
 
@@ -126,10 +130,6 @@ class AgentStateService:
         self,
         request: AgentStartRequest,
     ) -> dict:
-        """
-        Create a cloud request without starting
-        Playwright on the cloud server.
-        """
         self.ensure_no_active_run()
 
         state = self.build_state(
@@ -142,21 +142,66 @@ class AgentStateService:
             ),
         )
 
-        saved_state = agent_run_repository.create(
-            state
+        saved_state = (
+            agent_run_repository
+            .create(state)
         )
 
-        self.current_run_id = saved_state["run_id"]
+        self.current_run_id = (
+            saved_state["run_id"]
+        )
 
         return saved_state
+
+    def claim_next_queued(
+        self,
+    ) -> dict | None:
+        """
+        Called only by the Windows worker.
+        """
+        state = (
+            agent_run_repository
+            .get_next_queued()
+        )
+
+        if not state:
+            return None
+
+        self.current_run_id = state["run_id"]
+
+        state.update({
+            "status": "running",
+            "stage": "starting",
+            "message": (
+                "Windows worker claimed the run "
+                "and is starting automation."
+            ),
+            "updated_at": self.now(),
+        })
+
+        return agent_run_repository.update(
+            run_id=self.current_run_id,
+            state=state,
+        )
 
     def get(
         self,
     ) -> dict:
-        state = (
-            agent_run_repository
-            .get_latest()
-        )
+        state = None
+
+        if self.current_run_id:
+            state = (
+                agent_run_repository
+                .get_by_run_id(
+                    self.current_run_id
+                )
+            )
+
+        if not state:
+            state = (
+                agent_run_repository
+                .get_latest()
+            )
 
         if not state:
             return self.idle_state()
@@ -176,10 +221,7 @@ class AgentStateService:
 
         run_id = (
             self.current_run_id
-            or state.get(
-                "run_id",
-                "",
-            )
+            or state.get("run_id", "")
         )
 
         if not run_id:
@@ -198,9 +240,21 @@ class AgentStateService:
     def request_stop(
         self,
     ) -> dict:
-        state = self.get()
+        latest_state = (
+            agent_run_repository
+            .get_latest()
+        )
 
-        if state.get("status") == "queued":
+        if not latest_state:
+            return self.idle_state()
+
+        self.current_run_id = (
+            latest_state["run_id"]
+        )
+
+        if latest_state.get(
+            "status"
+        ) == "queued":
             return self.update(
                 status="stopped",
                 stage="stopped",

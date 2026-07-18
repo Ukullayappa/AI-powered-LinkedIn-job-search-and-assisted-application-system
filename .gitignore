@@ -1,0 +1,61 @@
+# Python environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Backend secrets
+.env
+.env.*
+!.env.example
+
+# Frontend secrets
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Node packages and build
+frontend/node_modules/
+frontend/dist/
+
+# LinkedIn browser sessions
+playwright/.auth/
+*-state.json
+
+# User files
+uploads/*
+!uploads/.gitkeep
+
+screenshots/*
+!screenshots/.gitkeep
+
+logs/*
+!logs/.gitkeep
+
+# Local JSON data
+data/*.json
+!data/.gitkeep
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Vercel
+.vercel/
+
+# IDE
+.vscode/
+.idea/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log

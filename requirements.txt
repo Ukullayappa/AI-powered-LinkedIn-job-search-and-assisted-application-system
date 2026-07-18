@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+crewai[openai]==1.15.3
+playwright
+pydantic-settings
+python-dotenv
+python-multipart
+pypdf
+python-docx
+email-validator
+json-repair

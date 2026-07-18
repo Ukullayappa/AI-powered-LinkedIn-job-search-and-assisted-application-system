@@ -59,9 +59,9 @@ async def public_demo_guard(
     call_next,
 ):
     """
-    Protect private candidate information and
-    automation endpoints while the deployed site
-    is being shared as a public portfolio demo.
+    Protect personal information and automation
+    endpoints when the deployed application is
+    running as a public portfolio demo.
     """
     protected_api_request = (
         request.url.path.startswith("/api/")

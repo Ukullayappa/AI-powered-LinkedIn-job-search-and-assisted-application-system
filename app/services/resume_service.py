@@ -6,6 +6,9 @@ from fastapi import UploadFile
 
 from app.core.config import get_settings
 from app.crews.resume_crew import ResumeCrew
+from app.repositories.profile_repository import (
+    profile_repository,
+)
 from app.schemas.profile_schema import ResumeProfile
 from app.schemas.resume_schema import ResumeUploadResponse
 from app.utils.document_reader import read_resume_text
@@ -117,6 +120,8 @@ class ResumeService:
             {},
         )
 
+        profile_repository.delete_default()
+
         return ResumeUploadResponse(
             original_filename=original_filename,
             stored_filename=stored_filename,
@@ -176,9 +181,17 @@ class ResumeService:
             extracted_text_path.resolve()
         )
 
+        profile_data = profile.model_dump()
+
+        profile_repository.save(
+            profile_data
+        )
+
+        # Keep a local cache temporarily while
+        # the remaining JSON data is migrated.
         storage.write(
             "profile",
-            profile.model_dump(),
+            profile_data,
         )
 
         return profile
@@ -186,10 +199,18 @@ class ResumeService:
     def get_profile(
         self,
     ) -> ResumeProfile:
-        profile_data = storage.read(
-            "profile",
-            {},
+        profile_data = (
+            profile_repository
+            .get_profile_data()
         )
+
+        # Temporary compatibility fallback for
+        # profiles created before Supabase migration.
+        if not profile_data:
+            profile_data = storage.read(
+                "profile",
+                {},
+            )
 
         if not profile_data:
             raise FileNotFoundError(

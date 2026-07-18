@@ -14,6 +14,9 @@ from app.schemas.job_schema import (
 from app.services.application_tracking_service import (
     application_tracking_service,
 )
+from app.services.resume_service import (
+    resume_service,
+)
 from app.utils.json_storage import storage
 
 
@@ -303,9 +306,10 @@ class JobRankingService:
         been submitted.
         """
 
-        profile = storage.read(
-            "profile",
-            {},
+        profile = (
+            resume_service
+            .get_profile()
+            .model_dump()
         )
 
         if not profile:

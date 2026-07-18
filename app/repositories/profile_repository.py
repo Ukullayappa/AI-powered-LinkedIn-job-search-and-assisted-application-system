@@ -148,6 +148,25 @@ class ProfileRepository:
 
         return result.data[0]
 
+    def delete_default(
+        self,
+    ) -> None:
+        """
+        Delete the old default profile when a
+        new resume is uploaded.
+        """
+
+        (
+            supabase_client
+            .table(self.TABLE_NAME)
+            .delete()
+            .eq(
+                "profile_name",
+                self.DEFAULT_PROFILE_NAME,
+            )
+            .execute()
+        )
+
     def get_default(
         self,
     ) -> dict[str, Any] | None:

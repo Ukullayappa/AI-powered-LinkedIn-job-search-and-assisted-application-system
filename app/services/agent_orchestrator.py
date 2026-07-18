@@ -75,17 +75,16 @@ class AgentOrchestrator:
                 ),
             )
 
-            await resume_service.analyze_resume()
-
-            profile = storage.read(
-                "profile",
-                {},
+            analyzed_profile = (
+                await resume_service.analyze_resume()
             )
+
+            profile = analyzed_profile.model_dump()
 
             if not profile:
                 raise RuntimeError(
                     "Resume analysis did not create "
-                    "profile.json."
+                    "a candidate profile."
                 )
 
             # 2. Login or reuse LinkedIn session.

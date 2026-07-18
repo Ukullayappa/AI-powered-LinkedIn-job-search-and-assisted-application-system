@@ -9,6 +9,9 @@ from app.schemas.application_schema import (
     ApplicationResult,
     PrepareApplicationRequest,
 )
+from app.services.resume_service import (
+    resume_service,
+)
 from app.utils.json_storage import storage
 
 
@@ -42,9 +45,10 @@ class LinkedInApplyService:
         self,
         request: PrepareApplicationRequest,
     ) -> ApplicationResult:
-        profile = storage.read(
-            "profile",
-            {},
+        profile = (
+            resume_service
+            .get_profile()
+            .model_dump()
         )
 
         if not profile:

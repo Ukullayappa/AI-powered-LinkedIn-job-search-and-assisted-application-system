@@ -349,20 +349,48 @@ class AgentOrchestrator:
                 return
 
             # 8. Complete workflow.
+            requested_count = request.maximum_applications
+            eligible_new_count = len(pending_jobs)
+
+            if submitted_count >= requested_count:
+                completion_message = (
+                    "Agent run completed. "
+                    f"{submitted_count} of "
+                    f"{requested_count} requested "
+                    "applications were submitted."
+                )
+
+            elif eligible_new_count < requested_count:
+                completion_message = (
+                    "Agent run completed. "
+                    f"{submitted_count} of "
+                    f"{requested_count} requested "
+                    "applications were submitted. "
+                    f"Only {eligible_new_count} new "
+                    "job(s) met the match-score and "
+                    "eligibility filters."
+                )
+
+            else:
+                completion_message = (
+                    "Agent run completed. "
+                    f"{submitted_count} of "
+                    f"{requested_count} requested "
+                    "applications were submitted. "
+                    f"{failed_count} application(s) "
+                    "were unavailable or skipped."
+                )
+
             agent_state_service.update(
                 status="completed",
                 stage="completed",
                 submitted_count=submitted_count,
                 failed_count=failed_count,
+                current_job_number=0,
                 current_job_id="",
                 current_job_title="",
-                message=(
-                    "Agent run completed. "
-                    f"{submitted_count} applications "
-                    "were submitted."
-                ),
+                message=completion_message,
             )
-
         except Exception as error:
             agent_state_service.update(
                 status="failed",

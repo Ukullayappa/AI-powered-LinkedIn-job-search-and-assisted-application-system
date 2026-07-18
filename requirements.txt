@@ -122,7 +122,7 @@ python-docx==1.2.0
 python-dotenv==1.2.2
 python-multipart==0.0.32
 pytube==15.0.0
-pywin32==312
+pywin32==312; sys_platform == "win32"
 PyYAML==6.0.3
 realtime==2.31.0
 referencing==0.37.0

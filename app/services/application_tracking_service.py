@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
-
+from app.repositories.application_repository import (
+    application_repository,
+)
 from app.schemas.application_schema import (
     ApplicationHistoryItem,
     NextJobResponse,
@@ -11,18 +12,48 @@ class ApplicationTrackingService:
     def get_history(
         self,
     ) -> list[ApplicationHistoryItem]:
-        """
-        Return all saved submitted applications.
-        """
-
-        saved_applications = storage.read(
-            "applications",
-            [],
+        saved_applications = (
+            application_repository.get_all()
         )
 
         return [
             ApplicationHistoryItem(
-                **application
+                job_id=str(
+                    application.get(
+                        "linkedin_job_id",
+                        "",
+                    )
+                ),
+                title=str(
+                    application.get(
+                        "title",
+                        "",
+                    )
+                ),
+                company=str(
+                    application.get(
+                        "company",
+                        "",
+                    )
+                ),
+                url=str(
+                    application.get(
+                        "url",
+                        "",
+                    )
+                ),
+                status=str(
+                    application.get(
+                        "status",
+                        "",
+                    )
+                ),
+                submitted_at=str(
+                    application.get(
+                        "submitted_at",
+                        "",
+                    )
+                ),
             )
             for application in saved_applications
         ]
@@ -30,38 +61,15 @@ class ApplicationTrackingService:
     def get_submitted_job_ids(
         self,
     ) -> set[str]:
-        """
-        Return all job IDs whose status is submitted.
-        """
-
-        applications = storage.read(
-            "applications",
-            [],
+        return (
+            application_repository
+            .get_submitted_job_ids()
         )
-
-        return {
-            str(
-                application.get(
-                    "job_id",
-                    "",
-                )
-            )
-            for application in applications
-            if (
-                application.get("status")
-                == "submitted"
-                and application.get("job_id")
-            )
-        }
 
     def is_submitted(
         self,
         job_id: str,
     ) -> bool:
-        """
-        Check whether one job was already submitted.
-        """
-
         return str(job_id) in (
             self.get_submitted_job_ids()
         )
@@ -70,13 +78,6 @@ class ApplicationTrackingService:
         self,
         job_id: str,
     ) -> ApplicationHistoryItem:
-        """
-        Save one job as submitted.
-
-        If the job already exists, update the existing
-        record instead of creating a duplicate.
-        """
-
         best_jobs = storage.read(
             "best_jobs",
             [],
@@ -109,69 +110,15 @@ class ApplicationTrackingService:
                 "data/best_jobs.json."
             )
 
-        applications = storage.read(
-            "applications",
-            [],
-        )
-
-        submitted_at = datetime.now(
-            timezone.utc
-        ).isoformat()
-
-        new_record = {
-            "job_id": str(job_id),
-
-            "title": selected_job.get(
-                "title",
-                "",
-            ),
-
-            "company": selected_job.get(
-                "company",
-                "",
-            ),
-
-            "url": selected_job.get(
-                "url",
-                "",
-            ),
-
-            "status": "submitted",
-
-            "submitted_at": submitted_at,
-        }
-
-        existing_record = next(
-            (
-                application
-                for application in applications
-                if str(
-                    application.get(
-                        "job_id",
-                        "",
-                    )
-                )
-                == str(job_id)
-            ),
-            None,
-        )
-
-        if existing_record is not None:
-            existing_record.update(
-                new_record
+        saved = (
+            application_repository
+            .save_submitted(
+                selected_job
             )
-        else:
-            applications.append(
-                new_record
-            )
-
-        storage.write(
-            "applications",
-            applications,
         )
 
         print(
-            "Application remembered as submitted:",
+            "Application saved in Supabase:",
             selected_job.get(
                 "title",
                 "",
@@ -179,17 +126,47 @@ class ApplicationTrackingService:
         )
 
         return ApplicationHistoryItem(
-            **new_record
+            job_id=str(
+                saved.get(
+                    "linkedin_job_id",
+                    "",
+                )
+            ),
+            title=str(
+                saved.get(
+                    "title",
+                    "",
+                )
+            ),
+            company=str(
+                saved.get(
+                    "company",
+                    "",
+                )
+            ),
+            url=str(
+                saved.get(
+                    "url",
+                    "",
+                )
+            ),
+            status=str(
+                saved.get(
+                    "status",
+                    "",
+                )
+            ),
+            submitted_at=str(
+                saved.get(
+                    "submitted_at",
+                    "",
+                )
+            ),
         )
 
     def get_next_job(
         self,
     ) -> NextJobResponse | None:
-        """
-        Return the next highest-ranked job that
-        has not already been submitted.
-        """
-
         best_jobs = storage.read(
             "best_jobs",
             [],
@@ -218,32 +195,26 @@ class ApplicationTrackingService:
 
             return NextJobResponse(
                 job_id=job_id,
-
                 title=job.get(
                     "title",
                     "",
                 ),
-
                 company=job.get(
                     "company",
                     "",
                 ),
-
                 location=job.get(
                     "location",
                     "",
                 ),
-
                 url=job.get(
                     "url",
                     "",
                 ),
-
                 match_score=job.get(
                     "match_score",
                     0,
                 ),
-
                 message=(
                     "This is the next highest-ranked "
                     "job that has not been submitted."

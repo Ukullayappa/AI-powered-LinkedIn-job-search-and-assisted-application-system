@@ -1,7 +1,5 @@
 import asyncio
 import re
-from pathlib import Path
-
 from playwright.async_api import (
     Browser,
     BrowserContext,
@@ -17,6 +15,7 @@ from app.schemas.browser_schema import LinkedInLoginResponse
 class LinkedInLoginService:
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.session_state: dict | None = None
 
     async def login(
         self,
@@ -28,7 +27,7 @@ class LinkedInLoginService:
             Create a fresh LinkedIn session.
 
         No credentials supplied:
-            Reuse the saved session. The agent
+            Reuse the in-memory session. The agent
             orchestrator uses this mode.
 
         The email and password are never saved.
@@ -41,12 +40,6 @@ class LinkedInLoginService:
             supplied_email and supplied_password
         )
 
-        auth_state_path = self.settings.linkedin_auth_state
-        auth_state_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
                 headless=False,
@@ -55,9 +48,9 @@ class LinkedInLoginService:
 
             try:
                 if has_credentials:
-                    # A new user may use another LinkedIn
-                    # account, so remove the old session.
-                    auth_state_path.unlink(missing_ok=True)
+                    # A fresh login replaces the previous
+                    # in-memory browser session.
+                    self.session_state = None
 
                     context = await browser.new_context(
                         viewport={
@@ -68,21 +61,12 @@ class LinkedInLoginService:
 
                     return await self.login_with_credentials(
                         context=context,
-                        auth_state_path=auth_state_path,
                         email=supplied_email,
                         password=supplied_password,
                     )
 
-                if not auth_state_path.exists():
-                    raise ValueError(
-                        "LinkedIn session was not found. "
-                        "Enter your LinkedIn email and "
-                        "password in the dashboard first."
-                    )
-
                 context = await self.create_saved_context(
                     browser=browser,
-                    auth_state_path=auth_state_path,
                 )
 
                 page = await context.new_page()
@@ -100,19 +84,19 @@ class LinkedInLoginService:
                     return LinkedInLoginResponse(
                         status="logged_in",
                         message=(
-                            "Existing LinkedIn session "
+                            "Existing in-memory LinkedIn session "
                             "loaded successfully."
                         ),
                         current_url=page.url,
                         session_saved=True,
                     )
 
-                auth_state_path.unlink(missing_ok=True)
+                self.session_state = None
 
                 raise ValueError(
-                    "The saved LinkedIn session expired. "
-                    "Enter your LinkedIn email and "
-                    "password in the dashboard again."
+                    "The in-memory LinkedIn session "
+                    "expired. Enter your LinkedIn email "
+                    "and password in the dashboard again."
                 )
 
             finally:
@@ -121,7 +105,6 @@ class LinkedInLoginService:
     async def login_with_credentials(
         self,
         context: BrowserContext,
-        auth_state_path: Path,
         email: str,
         password: str,
     ) -> LinkedInLoginResponse:
@@ -154,21 +137,9 @@ class LinkedInLoginService:
                 timeout=30000,
             )
         except PlaywrightTimeoutError as error:
-            screenshot_path = (
-                self.settings.screenshot_directory
-                / "linkedin-login-form-not-found.png"
-            )
-            screenshot_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-            await page.screenshot(
-                path=str(screenshot_path),
-                full_page=True,
-            )
             raise RuntimeError(
                 "Visible LinkedIn login fields were "
-                f"not found. Screenshot: {screenshot_path}"
+                "not found."
             ) from error
 
         print("LinkedIn email field found.")
@@ -177,26 +148,40 @@ class LinkedInLoginService:
         print("LinkedIn password field found.")
         await password_input.fill(password)
 
-        sign_in_button = page.locator(
-            "button[type='submit']:visible"
+        # Select only LinkedIn's normal email/password
+        # Sign in button. Do not select social-login
+        # buttons such as "Continue with Google".
+        sign_in_button = page.get_by_role(
+            "button",
+            name=re.compile(
+                r"^\\s*sign\\s+in\\s*$",
+                re.IGNORECASE,
+            ),
         ).first
 
-        if await sign_in_button.count() == 0:
-            sign_in_button = page.get_by_role(
-                "button",
-                name=re.compile(
-                    r"sign in",
-                    re.IGNORECASE,
-                ),
-            ).first
+        if await sign_in_button.count() > 0:
+            await sign_in_button.wait_for(
+                state="visible",
+                timeout=30000,
+            )
 
-        await sign_in_button.wait_for(
-            state="visible",
-            timeout=30000,
-        )
+            print(
+                "Clicking LinkedIn email/password "
+                "Sign in button."
+            )
 
-        print("Clicking LinkedIn Sign in button.")
-        await sign_in_button.click()
+            await sign_in_button.click()
+
+        else:
+            # Pressing Enter while focused on the password
+            # field submits the email/password form without
+            # clicking a Google or Apple login button.
+            print(
+                "Exact Sign in button was not found. "
+                "Submitting from the password field."
+            )
+
+            await password_input.press("Enter")
 
         login_result = await self.wait_for_result(page)
 
@@ -223,16 +208,18 @@ class LinkedInLoginService:
                 session_saved=False,
             )
 
-        await context.storage_state(
-            path=str(auth_state_path),
-            indexed_db=True,
+        self.session_state = (
+            await context.storage_state(
+                indexed_db=True,
+            )
         )
 
         return LinkedInLoginResponse(
             status="logged_in",
             message=(
                 "LinkedIn login successful. "
-                "The browser session was saved locally."
+                "The browser session is kept in memory "
+                "until the backend stops."
             ),
             current_url=page.url,
             session_saved=True,
@@ -320,23 +307,34 @@ class LinkedInLoginService:
             except Exception:
                 continue
 
+    def get_session_state(
+        self,
+    ) -> dict:
+        if not self.session_state:
+            raise ValueError(
+                "LinkedIn session was not found. "
+                "Enter your LinkedIn email and password "
+                "in the dashboard first."
+            )
+
+        return self.session_state
+
     async def create_saved_context(
         self,
         browser: Browser,
-        auth_state_path: Path,
     ) -> BrowserContext:
         try:
             return await browser.new_context(
-                storage_state=str(auth_state_path),
+                storage_state=self.get_session_state(),
                 viewport={
                     "width": 1440,
                     "height": 900,
                 },
             )
         except Exception as error:
-            auth_state_path.unlink(missing_ok=True)
+            self.session_state = None
             raise ValueError(
-                "The saved LinkedIn session could "
+                "The in-memory LinkedIn session could "
                 "not be loaded. Login again from "
                 "the dashboard."
             ) from error

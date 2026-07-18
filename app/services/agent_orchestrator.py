@@ -91,7 +91,7 @@ class AgentOrchestrator:
             agent_state_service.update(
                 stage="logging_in",
                 message=(
-                    "Loading the saved LinkedIn session."
+                    "Loading the in-memory LinkedIn session."
                 ),
             )
 
@@ -181,7 +181,11 @@ class AgentOrchestrator:
             )
 
             await job_ranking_service.rank_jobs(
-                rank_request
+                rank_request,
+                [
+                    job.model_dump()
+                    for job in jobs
+                ],
             )
 
             best_jobs = storage.read(

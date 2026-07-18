@@ -24,9 +24,6 @@ class Settings(BaseSettings):
     linkedin_email: str = ""
     linkedin_password: SecretStr = SecretStr("")
     linkedin_headless: bool = False
-    linkedin_auth_state: Path = Path(
-        "playwright/.auth/linkedin-state.json"
-    )
 
     # Application automation
     auto_submit: bool = False
@@ -43,10 +40,8 @@ class Settings(BaseSettings):
         le=100,
     )
 
-    # Local storage folders
+    # Only ranked job details are stored locally.
     data_directory: Path = Path("data")
-    upload_directory: Path = Path("uploads")
-    screenshot_directory: Path = Path("screenshots")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -56,22 +51,14 @@ class Settings(BaseSettings):
     )
 
     def create_directories(self) -> None:
-        directories = [
-            self.data_directory,
-            self.upload_directory,
-            self.screenshot_directory,
-            self.linkedin_auth_state.parent,
-        ]
+        self.data_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        for directory in directories:
-            directory.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-
     settings.create_directories()
-
     return settings

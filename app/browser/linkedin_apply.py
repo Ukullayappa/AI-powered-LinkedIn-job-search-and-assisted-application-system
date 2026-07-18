@@ -1,9 +1,10 @@
 import asyncio
 import re
-from pathlib import Path
-
 from playwright.async_api import Locator, Page, async_playwright
 
+from app.browser.linkedin_login import (
+    linkedin_login_service,
+)
 from app.core.config import get_settings
 from app.schemas.application_schema import (
     ApplicationResult,
@@ -24,22 +25,12 @@ class LinkedInApplyService:
         page: Page,
         job_id: str,
     ) -> str:
-        screenshot_path = (
-            self.settings.screenshot_directory
-            / f"application-{job_id}.png"
-        )
+        """
+        Screenshots are intentionally not stored
+        on the local computer.
+        """
 
-        screenshot_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        await page.screenshot(
-            path=str(screenshot_path),
-            full_page=True,
-        )
-
-        return str(screenshot_path)
+        return ""
 
     async def prepare_application(
         self,
@@ -77,27 +68,14 @@ class LinkedInApplyService:
                 "Job ID not found in best_jobs.json"
             )
 
-        resume_path = Path(
-            profile.get(
-                "raw_resume_path",
-                "",
-            )
+        resume_file = await asyncio.to_thread(
+            resume_service.get_resume_upload_payload
         )
 
-        if not resume_path.is_file():
-            raise ValueError(
-                f"Resume file not found: {resume_path}"
-            )
-
-        auth_file = (
-            self.settings.linkedin_auth_state
+        session_state = (
+            linkedin_login_service
+            .get_session_state()
         )
-
-        if not auth_file.exists():
-            raise ValueError(
-                "LinkedIn login session not found. "
-                "Login first."
-            )
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
@@ -106,7 +84,7 @@ class LinkedInApplyService:
             )
 
             context = await browser.new_context(
-                storage_state=str(auth_file),
+                storage_state=session_state,
                 viewport={
                     "width": 1440,
                     "height": 900,
@@ -183,7 +161,7 @@ class LinkedInApplyService:
 
                     await self.upload_resume(
                         area,
-                        resume_path,
+                        resume_file,
                     )
 
                     await self.scroll_modal_to_bottom(
@@ -259,7 +237,7 @@ class LinkedInApplyService:
                         await self.find_button(
                             page,
                             area,
-                            r"next|continue|review|save",
+                            r"^\s*(next|continue|next step|continue to next step|review|review application|review your application|save and continue)\s*$",
                         )
                     )
 
@@ -657,7 +635,7 @@ class LinkedInApplyService:
     async def upload_resume(
         self,
         area: Locator,
-        resume_path: Path,
+        resume_file: dict,
     ):
         file_input = area.locator(
             "input[type='file']"
@@ -666,12 +644,17 @@ class LinkedInApplyService:
         try:
             if await file_input.count() > 0:
                 await file_input.set_input_files(
-                    str(resume_path)
+                    files=[
+                        resume_file
+                    ]
                 )
 
                 print(
-                    f"Resume uploaded: "
-                    f"{resume_path.name}"
+                    "Resume uploaded from Supabase:",
+                    resume_file.get(
+                        "name",
+                        "resume",
+                    ),
                 )
 
                 await asyncio.sleep(1.5)
@@ -1143,7 +1126,7 @@ class LinkedInApplyService:
                 await self.find_button(
                     page,
                     area,
-                    r"next|continue|review|save",
+                    r"^\s*(next|continue|next step|continue to next step|review|review application|review your application|save and continue)\s*$",
                 )
             )
 

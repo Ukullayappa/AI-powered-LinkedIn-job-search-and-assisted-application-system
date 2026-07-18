@@ -1,18 +1,24 @@
+from __future__ import annotations
+
 import asyncio
+import mimetypes
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import UploadFile
 
-from app.core.config import get_settings
 from app.crews.resume_crew import ResumeCrew
 from app.repositories.profile_repository import (
     profile_repository,
 )
 from app.schemas.profile_schema import ResumeProfile
 from app.schemas.resume_schema import ResumeUploadResponse
-from app.utils.document_reader import read_resume_text
-from app.utils.json_storage import storage
+from app.repositories.resume_storage_repository import (
+    resume_storage_service,
+)
+from app.utils.document_reader import (
+    read_resume_bytes,
+)
 
 
 class ResumeService:
@@ -26,8 +32,6 @@ class ResumeService:
         self,
         uploaded_file: UploadFile,
     ) -> ResumeUploadResponse:
-        settings = get_settings()
-
         original_filename = Path(
             uploaded_file.filename or "resume"
         ).name
@@ -56,78 +60,83 @@ class ResumeService:
                 "Resume must be smaller than 5 MB."
             )
 
+        extracted_text = await asyncio.to_thread(
+            read_resume_bytes,
+            file_content,
+            extension,
+        )
+
         stored_filename = (
             f"{uuid4().hex}{extension}"
         )
 
-        stored_path = (
-            settings.upload_directory
-            / stored_filename
+        storage_path = (
+            resume_storage_service
+            .build_storage_path(
+                stored_filename
+            )
         )
 
-        stored_path.write_bytes(
-            file_content
+        content_type = (
+            uploaded_file.content_type
+            or mimetypes.guess_type(
+                original_filename
+            )[0]
+            or "application/octet-stream"
+        )
+
+        old_resume = (
+            profile_repository
+            .get_resume_record()
+        )
+
+        await asyncio.to_thread(
+            resume_storage_service.upload_bytes,
+            file_content=file_content,
+            storage_path=storage_path,
+            content_type=content_type,
         )
 
         try:
-            extracted_text = read_resume_text(
-                stored_path
+            await asyncio.to_thread(
+                profile_repository.save_resume_upload,
+                original_filename=original_filename,
+                content_type=content_type,
+                resume_text=extracted_text,
+                storage_path=storage_path,
             )
 
         except Exception:
-            if stored_path.exists():
-                stored_path.unlink()
-
+            await asyncio.to_thread(
+                resume_storage_service.remove,
+                storage_path,
+            )
             raise
 
-        extracted_text_path = (
-            settings.upload_directory
-            / f"{stored_path.stem}_extracted.txt"
+        old_storage_path = old_resume.get(
+            "storage_path",
+            "",
         )
 
-        extracted_text_path.write_text(
-            extracted_text,
-            encoding="utf-8",
-        )
-
-        resume_meta = {
-            "original_filename": (
-                original_filename
-            ),
-            "stored_filename": (
-                stored_filename
-            ),
-            "stored_path": str(
-                stored_path.resolve()
-            ),
-            "extracted_text_path": str(
-                extracted_text_path.resolve()
-            ),
-            "extracted_characters": len(
-                extracted_text
-            ),
-        }
-
-        storage.write(
-            "resume_meta",
-            resume_meta,
-        )
-
-        # Remove the old profile whenever
-        # a new resume is uploaded.
-        storage.write(
-            "profile",
-            {},
-        )
-
-        profile_repository.delete_default()
+        if (
+            old_storage_path
+            and old_storage_path != storage_path
+        ):
+            try:
+                await asyncio.to_thread(
+                    resume_storage_service.remove,
+                    old_storage_path,
+                )
+            except Exception as error:
+                print(
+                    "Old cloud resume cleanup skipped:",
+                    error,
+                )
 
         return ResumeUploadResponse(
             original_filename=original_filename,
             stored_filename=stored_filename,
-            stored_path=str(
-                stored_path.resolve()
-            ),
+            stored_path=storage_path,
             extracted_characters=len(
                 extracted_text
             ),
@@ -139,59 +148,33 @@ class ResumeService:
     async def analyze_resume(
         self,
     ) -> ResumeProfile:
-        resume_meta = storage.read(
-            "resume_meta",
-            {},
+        resume_record = (
+            profile_repository
+            .get_resume_record()
         )
 
-        if not resume_meta:
+        resume_text = resume_record.get(
+            "resume_text",
+            "",
+        )
+
+        if not resume_text:
             raise FileNotFoundError(
                 "Upload a resume first."
             )
-
-        extracted_text_path = Path(
-            resume_meta.get(
-                "extracted_text_path",
-                "",
-            )
-        )
-
-        if not extracted_text_path.exists():
-            raise FileNotFoundError(
-                "Extracted resume text was not found. "
-                "Upload the resume again."
-            )
-
-        resume_text = (
-            extracted_text_path.read_text(
-                encoding="utf-8"
-            )
-        )
 
         profile = await asyncio.to_thread(
             ResumeCrew().run,
             resume_text,
         )
 
-        profile.raw_resume_path = (
-            resume_meta["stored_path"]
-        )
+        # The resume now lives only in Supabase.
+        profile.raw_resume_path = ""
+        profile.extracted_text_path = ""
 
-        profile.extracted_text_path = str(
-            extracted_text_path.resolve()
-        )
-
-        profile_data = profile.model_dump()
-
-        profile_repository.save(
-            profile_data
-        )
-
-        # Keep a local cache temporarily while
-        # the remaining JSON data is migrated.
-        storage.write(
-            "profile",
-            profile_data,
+        await asyncio.to_thread(
+            profile_repository.save,
+            profile.model_dump(),
         )
 
         return profile
@@ -204,14 +187,6 @@ class ResumeService:
             .get_profile_data()
         )
 
-        # Temporary compatibility fallback for
-        # profiles created before Supabase migration.
-        if not profile_data:
-            profile_data = storage.read(
-                "profile",
-                {},
-            )
-
         if not profile_data:
             raise FileNotFoundError(
                 "Analyze the resume first."
@@ -220,6 +195,54 @@ class ResumeService:
         return ResumeProfile.model_validate(
             profile_data
         )
+
+    def get_resume_upload_payload(
+        self,
+    ) -> dict:
+        resume_record = (
+            profile_repository
+            .get_resume_record()
+        )
+
+        storage_path = resume_record.get(
+            "storage_path",
+            "",
+        )
+
+        if not storage_path:
+            raise FileNotFoundError(
+                "Cloud resume was not found. "
+                "Upload the resume again."
+            )
+
+        file_content = (
+            resume_storage_service
+            .download_bytes(
+                storage_path
+            )
+        )
+
+        original_filename = (
+            resume_record.get(
+                "original_filename",
+                "",
+            )
+            or Path(storage_path).name
+        )
+
+        content_type = (
+            resume_record.get(
+                "content_type",
+                "",
+            )
+            or "application/octet-stream"
+        )
+
+        return {
+            "name": original_filename,
+            "mimeType": content_type,
+            "buffer": file_content,
+        }
 
 
 resume_service = ResumeService()

@@ -5,6 +5,9 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from app.browser.linkedin_login import (
+    linkedin_login_service,
+)
 from app.core.config import get_settings
 from app.crews.job_match_crew import JobMatchCrew
 from app.schemas.job_schema import (
@@ -146,15 +149,10 @@ class JobRankingService:
         invisibly.
         """
 
-        auth_file = (
-            self.settings.linkedin_auth_state
+        session_state = (
+            linkedin_login_service
+            .get_session_state()
         )
-
-        if not auth_file.exists():
-            raise ValueError(
-                "LinkedIn session was not found. "
-                "Run POST /api/linkedin/login first."
-            )
 
         async with async_playwright() as playwright:
             # JD collection stays invisible.
@@ -163,7 +161,7 @@ class JobRankingService:
             )
 
             context = await browser.new_context(
-                storage_state=str(auth_file),
+                storage_state=session_state,
                 viewport={
                     "width": 1440,
                     "height": 900,
@@ -225,34 +223,8 @@ class JobRankingService:
                         )
 
                         if not description:
-                            screenshot_path = (
-                                self.settings
-                                .screenshot_directory
-                                / (
-                                    "description-"
-                                    f"{job['job_id']}.png"
-                                )
-                            )
-
-                            screenshot_path.parent.mkdir(
-                                parents=True,
-                                exist_ok=True,
-                            )
-
-                            await page.screenshot(
-                                path=str(
-                                    screenshot_path
-                                ),
-                                full_page=True,
-                            )
-
                             print(
                                 "Description was not found."
-                            )
-
-                            print(
-                                "Screenshot saved:",
-                                screenshot_path,
                             )
 
                     except ValueError:
@@ -265,11 +237,6 @@ class JobRankingService:
                         )
 
                         job["description"] = ""
-
-                storage.write(
-                    "jobs",
-                    jobs,
-                )
 
                 return jobs
 
@@ -300,6 +267,7 @@ class JobRankingService:
     async def rank_jobs(
         self,
         request: RankJobsRequest,
+        jobs: list[dict],
     ) -> list[RankedJob]:
         """
         Rank only jobs that have not already
@@ -317,11 +285,6 @@ class JobRankingService:
                 "Resume profile was not found. "
                 "Upload and analyze the resume first."
             )
-
-        jobs = storage.read(
-            "jobs",
-            [],
-        )
 
         if not jobs:
             raise ValueError(

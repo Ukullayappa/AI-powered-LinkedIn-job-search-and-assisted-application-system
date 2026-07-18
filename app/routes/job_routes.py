@@ -63,7 +63,10 @@ async def rank_jobs(
     try:
         return await (
             job_ranking_service
-            .rank_jobs(request)
+            .rank_jobs(
+                request,
+                linkedin_search_service.get_latest_jobs(),
+            )
         )
 
     except ValueError as error:
@@ -80,17 +83,6 @@ async def rank_jobs(
                 f"{error}"
             ),
         ) from error
-
-
-@router.get(
-    "/saved",
-    response_model=list[JobItem],
-)
-async def get_saved_jobs():
-    return storage.read(
-        "jobs",
-        [],
-    )
 
 
 @router.get(

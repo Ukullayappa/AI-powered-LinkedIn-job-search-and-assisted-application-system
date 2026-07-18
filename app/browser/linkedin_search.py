@@ -6,6 +6,9 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from app.browser.linkedin_login import (
+    linkedin_login_service,
+)
 from app.core.config import get_settings
 from app.schemas.job_schema import (
     JobItem,
@@ -14,12 +17,23 @@ from app.schemas.job_schema import (
 from app.services.application_tracking_service import (
     application_tracking_service,
 )
-from app.utils.json_storage import storage
 
 
 class LinkedInSearchService:
     def __init__(self):
         self.settings = get_settings()
+
+        # Raw collected jobs live only in memory.
+        # They are cleared when the backend restarts.
+        self.latest_jobs: list[dict] = []
+
+    def get_latest_jobs(
+        self,
+    ) -> list[dict]:
+        return [
+            dict(job)
+            for job in self.latest_jobs
+        ]
 
     def create_search_url(
         self,
@@ -129,15 +143,10 @@ class LinkedInSearchService:
         self,
         request: JobSearchRequest,
     ) -> list[JobItem]:
-        auth_file = (
-            self.settings.linkedin_auth_state
+        session_state = (
+            linkedin_login_service
+            .get_session_state()
         )
-
-        if not auth_file.exists():
-            raise ValueError(
-                "LinkedIn session was not found. "
-                "Run POST /api/linkedin/login first."
-            )
 
         submitted_job_ids = (
             application_tracking_service
@@ -160,7 +169,7 @@ class LinkedInSearchService:
             )
 
             context = await browser.new_context(
-                storage_state=str(auth_file),
+                storage_state=session_state,
                 viewport={
                     "width": 1440,
                     "height": 900,
@@ -342,23 +351,18 @@ class LinkedInSearchService:
                     collected_jobs.values()
                 )
 
-                # Replace jobs.json with only the new,
-                # not-yet-submitted jobs from this run.
-                storage.write(
-                    "jobs",
-                    [
-                        job.model_dump()
-                        for job in jobs
-                    ],
-                )
-
                 print(
                     "Submitted jobs skipped:",
                     skipped_submitted,
                 )
 
+                self.latest_jobs = [
+                    job.model_dump()
+                    for job in jobs
+                ]
+
                 print(
-                    "New jobs saved:",
+                    "New jobs collected in memory:",
                     len(jobs),
                 )
 
